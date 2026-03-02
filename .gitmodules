@@ -1,0 +1,9 @@
+[submodule "components/software/fcontroller"]
+	path = components/software/fcontroller
+	url = https://github.com/pthrr/fcontroller
+[submodule "components/software/ice40-fft"]
+	path = components/software/ice40-fft
+	url = https://github.com/pthrr/drone-fft
+[submodule "components/software/ice40-phy"]
+	path = components/software/ice40-phy
+	url = https://github.com/pthrr/drone-phy

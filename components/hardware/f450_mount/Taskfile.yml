@@ -1,0 +1,9 @@
+version: "3"
+
+tasks:
+  open-top:
+    desc: Open F450 top mount (UNO Q) in OpenSCAD
+    cmd: openscad {{.TASKFILE_DIR}}/f450_top_mount.scad
+  open-bottom:
+    desc: Open F450 bottom mount (iCE40 + radar) in OpenSCAD
+    cmd: openscad {{.TASKFILE_DIR}}/f450_bottom_mount.scad

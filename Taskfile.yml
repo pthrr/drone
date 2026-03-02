@@ -1,0 +1,9 @@
+version: "3"
+
+includes:
+  f450:
+    taskfile: components/hardware/f450_mount/Taskfile.yml
+    dir: components/hardware/f450_mount
+  gs:
+    taskfile: components/software/ground_station/Taskfile.yml
+    dir: components/software/ground_station

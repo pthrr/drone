@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(nix flake lock:*)",
+      "Bash(task f450:open:*)",
+      "Bash(echo:*)",
+      "Bash(nix develop:*)",
+      "Bash(openscad:*)",
+      "Bash(uv run:*)",
+      "Bash(ls:*)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:github.com)",
+      "Bash(uv sync:*)"
+    ]
+  }
+}
