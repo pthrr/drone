@@ -1,0 +1,15 @@
+version: "3"
+
+tasks:
+  run:
+    desc: Run ground station waterfall viewer
+    cmd: uv run ground-station
+  demo:
+    desc: Run with synthetic data (no SDR needed)
+    cmd: uv run ground-station --demo
+  test:
+    desc: Run full test suite
+    cmd: uv run --group dev pytest tests/ -v
+  test-unit:
+    desc: Run pure unit tests (no Qt)
+    cmd: uv run --group dev pytest tests/test_dsp.py -v
