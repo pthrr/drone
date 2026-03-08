@@ -11,7 +11,22 @@
       "WebFetch(domain:raw.githubusercontent.com)",
       "WebFetch(domain:github.com)",
       "Bash(uv sync:*)",
-      "WebSearch"
+      "WebSearch",
+      "Bash(curl:*)",
+      "Bash(python3:*)",
+      "Bash(task --list:*)",
+      "WebFetch(domain:docs.arduino.cc)",
+      "Bash(lsusb:*)",
+      "Bash(command -v qdl:*)",
+      "Bash(command -v:*)",
+      "Bash(nix search:*)",
+      "Bash(nix flake check:*)",
+      "WebFetch(domain:api.github.com)",
+      "Bash(ping:*)",
+      "Bash(ip:*)",
+      "Bash(debugfs:*)",
+      "Bash(mcopy:*)",
+      "Bash(gunzip:*)"
     ]
   }
 }

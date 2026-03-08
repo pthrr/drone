@@ -5,7 +5,7 @@ header:
   version: 14
 
 machine: qcom-armv8a
-distro: qcom-wayland
+distro: poky
 
 repos:
   poky:
@@ -17,10 +17,6 @@ repos:
 
   meta-qcom:
     url: https://github.com/Linaro/meta-qcom
-    branch: scarthgap
-
-  meta-qcom-distro:
-    url: https://github.com/qualcomm-linux/meta-qcom-distro
     branch: scarthgap
 
   meta-openembedded:
@@ -37,67 +33,22 @@ repos:
     branch: scarthgap
 
   meta-companion:
-    path: ../meta-companion
+    path: meta-companion
 
 local_conf_header:
   base: |
     CONF_VERSION = "2"
     INHERIT += "rm_work"
+    INIT_MANAGER = "systemd"
   kernel: |
     PREFERRED_PROVIDER_virtual/kernel = "linux-arduino"
+  initramfs: |
+    INITRAMFS_IMAGE = "companion-initramfs"
+    INITRAMFS_IMAGE_BUNDLE = "1"
   packages: |
     IMAGE_INSTALL:append = " spitools i2c-tools devmem2 coreutils"
   usb-gadget: |
-    IMAGE_INSTALL:append = " kernel-module-usb-f-ecm kernel-module-libcomposite"
-    ROOTFS_POSTPROCESS_COMMAND:append = " configure_usb_gadget;"
-    configure_usb_gadget() {
-        # systemd-networkd config: static IP on usb0
-        install -d ${IMAGE_ROOTFS}${sysconfdir}/systemd/network
-        cat > ${IMAGE_ROOTFS}${sysconfdir}/systemd/network/10-usb0.network << 'NETEOF'
-    [Match]
-    Name=usb0
-
-    [Network]
-    Address=192.168.7.2/30
-    NETEOF
-
-        # systemd service to configure USB gadget ECM at boot
-        install -d ${IMAGE_ROOTFS}${systemd_system_unitdir}
-        cat > ${IMAGE_ROOTFS}${systemd_system_unitdir}/usb-gadget.service << 'SVCEOF'
-    [Unit]
-    Description=USB ECM gadget network
-    DefaultDependencies=no
-    After=sys-kernel-config.mount
-    Wants=sys-kernel-config.mount
-
-    [Service]
-    Type=oneshot
-    RemainAfterExit=yes
-    ExecStart=/bin/sh -c '\
-        modprobe libcomposite && \
-        mkdir -p /sys/kernel/config/usb_gadget/g0 && \
-        cd /sys/kernel/config/usb_gadget/g0 && \
-        echo 0x1d6b > idVendor && \
-        echo 0x0104 > idProduct && \
-        mkdir -p strings/0x409 && \
-        echo "drone-companion" > strings/0x409/product && \
-        mkdir -p configs/c.1/strings/0x409 && \
-        echo "ECM" > configs/c.1/strings/0x409/configuration && \
-        mkdir -p functions/ecm.usb0 && \
-        ln -sf functions/ecm.usb0 configs/c.1/ && \
-        ls /sys/class/udc/ | head -1 > UDC'
-
-    [Install]
-    WantedBy=multi-user.target
-    SVCEOF
-
-        ln -sf ${systemd_system_unitdir}/usb-gadget.service \
-            ${IMAGE_ROOTFS}${sysconfdir}/systemd/system/multi-user.target.wants/usb-gadget.service
-
-        # Enable systemd-networkd
-        ln -sf ${systemd_system_unitdir}/systemd-networkd.service \
-            ${IMAGE_ROOTFS}${sysconfdir}/systemd/system/multi-user.target.wants/systemd-networkd.service
-    }
+    IMAGE_INSTALL:append = " usb-gadget"
   ssh: |
     EXTRA_IMAGE_FEATURES:append = " ssh-server-openssh"
   hostname: |

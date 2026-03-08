@@ -1,40 +1,262 @@
 version: "3"
 
 vars:
-  KAS_DIR: "{{.ROOT_DIR}}/kas"
-  IMAGE_DIR: "{{.ROOT_DIR}}/build/tmp/deploy/images/qcom-armv8a"
+  KAS_DIR: "{{.TASKFILE_DIR}}/kas"
+  IMAGE_DIR: "{{.TASKFILE_DIR}}/build/tmp/deploy/images/qcom-armv8a"
+  FIRMWARE_DIR: "{{.TASKFILE_DIR}}/firmware"
+  BOOTLOADER_DIR: "{{.TASKFILE_DIR}}/bootloader"
   COMPANION_HOST: '{{.COMPANION_HOST | default "192.168.7.2"}}'
+  BUILD_SERVER: '{{.BUILD_SERVER | default "nwv-srv"}}'
+  BUILDBOT_URL: 'http://{{.BUILD_SERVER}}:8020'
+  REMOTE_BUILD_DIR: /persist/buildbot/workspaces/drone/components/software/companion
+  S3_ENDPOINT: 'http://{{.BUILD_SERVER}}:8333'
+  S3_BUCKET: '{{.S3_BUCKET | default "buildbot-artifacts"}}'
   REMOTE_FW_DIR: /opt/drone
-  SERVICES_DIR: "{{.ROOT_DIR}}/services"
+  SERVICES_DIR: "{{.TASKFILE_DIR}}/services"
   BITSTREAM: '{{.BITSTREAM | default "../../ice40-top/build/top.bin"}}'
+  # NOTE: This cmdline is passed by systemd-boot. The REAL cmdline (with rootwait
+  # and correct root=) is baked into the kernel via CONFIG_CMDLINE_EXTEND in
+  # cmdline.cfg. This line just needs to be valid enough for systemd-boot to not
+  # crash — the extracted Arduino systemd-boot has a bug where changing the
+  # options line length/content can cause boot failure.
+  KERNEL_CMDLINE: "root=/dev/disk/by-partlabel/rootfs rw rootfstype=ext4 console=ttyMSM0,115200n8"
 
 tasks:
-  # --- Yocto build ---
+  # --- Remote Yocto build (via Buildbot) ---
   build:
-    desc: Build RT image for QRB2210
+    desc: Build RT image on build server
     cmds:
-      - kas build {{.KAS_DIR}}/companion-rt.yml
+      - |
+        RESULT=$(curl -s -X POST {{.BUILDBOT_URL}}/api/v2/forceschedulers/force \
+          -H 'Content-Type: application/json' \
+          -d '{"id":1,"jsonrpc":"2.0","method":"force","params":{
+            "reason":"companion build",
+            "job_script":"export PATH=/run/current-system/sw/bin:$PATH; cd /persist/buildbot/workspaces/drone && git pull; cd /persist/buildbot/workspaces/drone/components/software/companion; KAS=$(nix build --no-link --print-out-paths nixpkgs#kas); $KAS/bin/kas-container shell kas/companion-rt.yml -c \"bitbake -c cleansstate linux-arduino\"; $KAS/bin/kas-container build kas/companion-rt.yml && AWSCLI=$(nix build --no-link --print-out-paths nixpkgs#awscli2); export AWS_ACCESS_KEY_ID=admin; export AWS_SECRET_ACCESS_KEY=admin; AWS=$AWSCLI/bin/aws; BUILD_ID=$(curl -s http://localhost:8020/api/v2/builds?order=-buildid\\&limit=1 | sed -n \"s/.*buildrequestid[^0-9]*\\([0-9]*\\).*/\\1/p\" | head -1); $AWS --endpoint-url http://localhost:8333 s3 mb s3://{{.S3_BUCKET}} 2>/dev/null; IMG=build/tmp/deploy/images/qcom-armv8a; INITRAMFS=$(ls $IMG/Image-initramfs-*.bin 2>/dev/null | head -1); if [ -n \"$INITRAMFS\" ]; then gzip -c $INITRAMFS > $IMG/Image.gz; fi; for f in $IMG/Image.gz $IMG/core-image-base-qcom-armv8a.rootfs.ext4.gz $IMG/qrb2210-rb1.dtb $IMG/modules-qcom-armv8a.tgz; do $AWS --endpoint-url http://localhost:8333 s3 cp $(readlink -f $f) s3://{{.S3_BUCKET}}/$BUILD_ID/$(basename $f); done; $AWS --endpoint-url http://localhost:8333 s3 cp s3://{{.S3_BUCKET}}/$BUILD_ID/ s3://{{.S3_BUCKET}}/latest/ --recursive",
+            "job_args":""}}')
+        echo "$RESULT" | python3 -c "import sys,json; r=json.load(sys.stdin); print('Build triggered: buildset', list(r['result'][1].values())[0])"
 
-  build-dev:
-    desc: Build dev image (standard kernel + debug tools)
+  build-status:
+    desc: Show latest build status
     cmds:
-      - kas build {{.KAS_DIR}}/companion-rt.yml:{{.KAS_DIR}}/companion-dev.yml
+      - |
+        curl -s {{.BUILDBOT_URL}}/api/v2/builds?order=-buildid\&limit=1 | \
+          python3 -c "import sys,json; b=json.load(sys.stdin)['builds'][0]; print(f'build {b[\"buildid\"]}: complete={b[\"complete\"]} state={b[\"state_string\"]}');"
+
+  build-log:
+    desc: Show tail of latest build log
+    cmds:
+      - curl -s {{.BUILDBOT_URL}}/api/v2/logs/$(curl -s {{.BUILDBOT_URL}}/api/v2/builds?order=-buildid\&limit=1 | python3 -c "import sys,json; print(json.load(sys.stdin)['builds'][0]['buildid'])")/raw 2>&1 | tail -20
+
+  # --- Local Yocto build (kas-container) ---
+  build-local:
+    desc: Build RT image locally via kas-container
+    cmds:
+      - kas-container build {{.KAS_DIR}}/companion-rt.yml
 
   shell:
     desc: Open bitbake shell for RT build
     cmds:
-      - kas shell {{.KAS_DIR}}/companion-rt.yml
+      - kas-container shell {{.KAS_DIR}}/companion-rt.yml
 
-  # --- Flash Linux to eMMC (one-time) ---
-  flash:
-    desc: Flash Linux image to eMMC via EDL (qdl)
+  # --- Download images from S3 ---
+  download:
+    desc: "Download built images from SeaweedFS S3 (BUILD_ID=latest by default, or a build number e.g. 52)"
+    vars:
+      BUILD_ID: '{{.BUILD_ID | default "latest"}}'
+    cmds:
+      - mkdir -p {{.IMAGE_DIR}}
+      - |
+        for f in Image.gz core-image-base-qcom-armv8a.rootfs.ext4.gz qrb2210-rb1.dtb modules-qcom-armv8a.tgz; do
+          echo "Downloading {{.BUILD_ID}}/$f..."
+          curl -sf "{{.S3_ENDPOINT}}/{{.S3_BUCKET}}/{{.BUILD_ID}}/$f" -o "{{.IMAGE_DIR}}/$f" || { echo "Failed to download $f"; exit 1; }
+        done
+      - echo "Downloaded {{.BUILD_ID}} to {{.IMAGE_DIR}}/"
+
+  # --- Create ESP image (kernel + DTB + systemd-boot on FAT32) ---
+  make-esp:
+    desc: Create FAT32 ESP image with kernel, DTB, and boot config
     preconditions:
-      - sh: lsusb | grep -q 05c6:9008
-        msg: "Board not in EDL mode. Short JCTL pins 1-2 (furthest from USB-C), then plug in USB. Verify: lsusb | grep 05c6:9008"
+      - sh: test -f {{.IMAGE_DIR}}/Image.gz
+        msg: "Kernel not found. Run 'task companion:download' first."
+      - sh: test -f {{.IMAGE_DIR}}/qrb2210-rb1.dtb
+        msg: "DTB not found. Run 'task companion:download' first."
+      - sh: test -f {{.BOOTLOADER_DIR}}/BOOTAA64.EFI
+        msg: "systemd-boot not found in {{.BOOTLOADER_DIR}}/. Run 'task companion:pull-bootloader' first."
+      - sh: command -v mformat
+        msg: "mtools not found. Install mtools."
+    cmds:
+      # Decompress kernel — systemd-boot needs the raw EFI stub Image, not .gz
+      - |
+        echo "Decompressing kernel..."
+        gunzip -kf {{.IMAGE_DIR}}/Image.gz
+      # Create 128 MB FAT32 image
+      - |
+        echo "Creating FAT32 ESP image..."
+        dd if=/dev/zero of={{.IMAGE_DIR}}/esp.img bs=1M count=128 status=none
+        mformat -F -i {{.IMAGE_DIR}}/esp.img ::
+      # Create directory structure
+      - |
+        mmd -i {{.IMAGE_DIR}}/esp.img \
+          ::/EFI ::/EFI/BOOT \
+          ::/loader ::/loader/entries \
+          ::/dtb ::/dtb/qcom
+      # Install systemd-boot as default EFI bootloader
+      - mcopy -i {{.IMAGE_DIR}}/esp.img {{.BOOTLOADER_DIR}}/BOOTAA64.EFI ::/EFI/BOOT/
+      # Install kernel
+      - mcopy -i {{.IMAGE_DIR}}/esp.img {{.IMAGE_DIR}}/Image ::/
+      # Install DTB
+      - mcopy -i {{.IMAGE_DIR}}/esp.img {{.IMAGE_DIR}}/qrb2210-rb1.dtb ::/dtb/qcom/
+      # Create systemd-boot loader config
+      - |
+        TMPDIR=$(mktemp -d)
+        echo "default yocto.conf" > "$TMPDIR/loader.conf"
+        echo "timeout 3" >> "$TMPDIR/loader.conf"
+        mcopy -i {{.IMAGE_DIR}}/esp.img "$TMPDIR/loader.conf" ::/loader/
+        # NOTE: No "devicetree" directive — U-Boot passes the DTB it already loaded
+        # to the kernel via UEFI. Adding "devicetree" here causes boot failure.
+        cat > "$TMPDIR/yocto.conf" <<'ENTRY'
+        title    Yocto RT Linux
+        linux    /Image
+        options  {{.KERNEL_CMDLINE}}
+        ENTRY
+        # Strip leading whitespace from heredoc
+        sed -i 's/^        //' "$TMPDIR/yocto.conf"
+        mcopy -i {{.IMAGE_DIR}}/esp.img "$TMPDIR/yocto.conf" ::/loader/entries/
+        rm -rf "$TMPDIR"
+      - |
+        echo "Created esp.img ($(du -h {{.IMAGE_DIR}}/esp.img | cut -f1))"
+        echo "Contents:"
+        mdir -i {{.IMAGE_DIR}}/esp.img ::/
+        mdir -i {{.IMAGE_DIR}}/esp.img ::/loader/entries/
+
+  # --- Extract systemd-boot from running Arduino board (one-time) ---
+  pull-bootloader:
+    desc: "Extract systemd-boot EFI binary from running board via ADB (one-time)"
+    preconditions:
+      - sh: command -v adb
+        msg: "adb not found."
+      - sh: adb devices | grep -q device$
+        msg: "No ADB device found. Board must be running (Arduino Debian or similar)."
+    cmds:
+      - mkdir -p {{.BOOTLOADER_DIR}}
+      - adb pull /boot/efi/EFI/BOOT/BOOTAA64.EFI {{.BOOTLOADER_DIR}}/BOOTAA64.EFI
+      - echo "Saved systemd-boot to {{.BOOTLOADER_DIR}}/BOOTAA64.EFI"
+
+  # --- Flash firmware via EDL (one-time) ---
+  flash-firmware:
+    desc: "Flash Qualcomm boot firmware via EDL (one-time, writes partition table + boot chain)"
+    preconditions:
       - sh: command -v qdl
         msg: "qdl not found. Install: https://github.com/linux-msm/qdl"
+      - sh: test -f {{.FIRMWARE_DIR}}/prog_firehose_ddr.elf
+        msg: "Firmware not found in {{.FIRMWARE_DIR}}/."
     cmds:
-      - qdl --storage emmc {{.IMAGE_DIR}}/prog_firehose.elf {{.IMAGE_DIR}}/rawprogram*.xml {{.IMAGE_DIR}}/patch*.xml
+      - |
+        echo "Waiting for EDL device (05c6:9008)..."
+        echo "Short JCTL pins 1-2 (furthest from USB-C), then plug in USB."
+        while ! lsusb | grep -q 05c6:9008; do sleep 1; done
+        echo "EDL device found."
+      - cd {{.FIRMWARE_DIR}} && sudo "$(command -v qdl)" --allow-missing --storage emmc prog_firehose_ddr.elf rawprogram0.xml patch0.xml
+      - |
+        echo ""
+        echo "Firmware flashed."
+        read -p "Remove JCTL jumper and replug USB, then press Enter..."
+
+  # --- Flash OS via fastboot (ESP + rootfs) ---
+  flash-os:
+    desc: "Flash ESP + rootfs via fastboot"
+    preconditions:
+      - sh: command -v fastboot
+        msg: "fastboot not found."
+      - sh: test -f {{.IMAGE_DIR}}/esp.img
+        msg: "ESP image not found. Run 'task companion:make-esp' first."
+      - sh: test -f {{.IMAGE_DIR}}/core-image-base-qcom-armv8a.rootfs.ext4.gz
+        msg: "Rootfs not found. Run 'task companion:download' first."
+    cmds:
+      - |
+        echo "Waiting for fastboot device..."
+        echo "Board enters fastboot after wipe-boot (or 'reboot bootloader' from running OS)."
+        while ! sudo "$(command -v fastboot)" devices 2>/dev/null | grep -q .; do sleep 1; done
+        echo "Fastboot device found."
+      - |
+        echo "Decompressing rootfs..."
+        gunzip -kf {{.IMAGE_DIR}}/core-image-base-qcom-armv8a.rootfs.ext4.gz
+      - |
+        echo "Flashing ESP (kernel + DTB + bootloader)..."
+        sudo "$(command -v fastboot)" flash efi {{.IMAGE_DIR}}/esp.img
+      - |
+        echo "Flashing rootfs..."
+        sudo "$(command -v fastboot)" flash rootfs {{.IMAGE_DIR}}/core-image-base-qcom-armv8a.rootfs.ext4
+      - |
+        echo "Setting slot A active and clearing UEFI variables..."
+        sudo "$(command -v fastboot)" set_active a
+        sudo "$(command -v fastboot)" erase uefivarstore
+      - |
+        echo "Done. U-Boot must be flashed separately via EDL (flash-firmware or flash-all)."
+        echo "Run 'task companion:flash-all' to flash firmware+ESP via EDL in one shot."
+
+  # --- Flash firmware + ESP together via EDL ---
+  flash-all:
+    desc: "Flash firmware + ESP via EDL in one shot (most reliable)"
+    preconditions:
+      - sh: command -v qdl
+        msg: "qdl not found."
+      - sh: test -f {{.FIRMWARE_DIR}}/prog_firehose_ddr.elf
+        msg: "Firmware not found in {{.FIRMWARE_DIR}}/."
+      - sh: test -f {{.IMAGE_DIR}}/esp.img
+        msg: "ESP image not found. Run 'task companion:make-esp' first."
+    cmds:
+      - |
+        echo "Copying ESP image to firmware directory..."
+        cp {{.IMAGE_DIR}}/esp.img {{.FIRMWARE_DIR}}/esp.img
+      - |
+        echo "Waiting for EDL device (05c6:9008)..."
+        echo "Short JCTL pins 1-2 (furthest from USB-C), then plug in USB."
+        while ! lsusb | grep -q 05c6:9008; do sleep 1; done
+        echo "EDL device found."
+      - cd {{.FIRMWARE_DIR}} && sudo "$(command -v qdl)" --allow-missing --storage emmc prog_firehose_ddr.elf rawprogram0.xml rawprogram_esp.xml patch0.xml
+      - |
+        echo ""
+        echo "Firmware + ESP flashed."
+        echo "Remove JCTL jumper and replug USB."
+        read -p "Press Enter when ready..."
+
+  # --- Recovery: wipe boot partitions via EDL ---
+  wipe-boot:
+    desc: "Wipe boot_a, boot_b, and ESP via EDL (recovery when board is stuck in boot loop)"
+    preconditions:
+      - sh: command -v qdl
+        msg: "qdl not found."
+      - sh: test -f {{.FIRMWARE_DIR}}/prog_firehose_ddr.elf
+        msg: "Firmware not found in {{.FIRMWARE_DIR}}/."
+      - sh: test -f {{.FIRMWARE_DIR}}/blank_esp.img
+        msg: "blank_esp.img not found in {{.FIRMWARE_DIR}}/."
+    cmds:
+      - |
+        echo "Waiting for EDL device (05c6:9008)..."
+        echo "Short JCTL pins 1-2 (furthest from USB-C), then plug in USB."
+        while ! lsusb | grep -q 05c6:9008; do sleep 1; done
+        echo "EDL device found."
+      - cd {{.FIRMWARE_DIR}} && sudo "$(command -v qdl)" --allow-missing --storage emmc prog_firehose_ddr.elf rawprogram_wipe_esp.xml
+      - |
+        echo ""
+        echo "Boot partitions wiped. Remove JCTL jumper and replug USB."
+        echo "Board will enter fastboot (boot_a is empty)."
+        read -p "Press Enter when ready..."
+
+  # --- Serial console ---
+  serial:
+    desc: "Open serial console (1.8V UART on JCTL header, 115200 baud)"
+    cmds:
+      - |
+        SERIAL_DEV=$(ls /dev/ttyUSB* /dev/ttyACM* 2>/dev/null | head -1)
+        if [ -z "$SERIAL_DEV" ]; then
+          echo "No serial device found. Connect 1.8V USB-to-TTL adapter to JCTL header."
+          echo "  Pin 3 = TX (board→host), Pin 4 = RX (host→board), Pin 6 = GND"
+          exit 1
+        fi
+        echo "Connecting to $SERIAL_DEV at 115200..."
+        picocom -b 115200 "$SERIAL_DEV"
 
   # --- USB network ---
   host-setup:
@@ -74,12 +296,32 @@ tasks:
     cmds:
       - ssh root@{{.COMPANION_HOST}}
 
-  # --- Deploy to running board (iterative) ---
+  # --- Deploy to running board (iterative, requires SSH) ---
   deploy:
-    desc: Deploy services + iCE40 bitstream to board
+    desc: Deploy kernel + services + iCE40 bitstream to board
     cmds:
+      - task: deploy-kernel
       - task: deploy-services
       - task: deploy-bitstream
+
+  deploy-kernel:
+    desc: Update kernel + DTB on running board's ESP
+    preconditions:
+      - sh: test -f {{.IMAGE_DIR}}/Image.gz
+        msg: "Kernel not found. Run 'task companion:download' first."
+      - sh: test -f {{.IMAGE_DIR}}/qrb2210-rb1.dtb
+        msg: "DTB not found. Run 'task companion:download' first."
+    cmds:
+      - |
+        echo "Decompressing kernel..."
+        gunzip -kf {{.IMAGE_DIR}}/Image.gz
+      - |
+        echo "Uploading kernel + DTB to ESP..."
+        scp {{.IMAGE_DIR}}/Image root@{{.COMPANION_HOST}}:/boot/efi/
+        scp {{.IMAGE_DIR}}/qrb2210-rb1.dtb root@{{.COMPANION_HOST}}:/boot/efi/dtb/qcom/
+      - |
+        echo "Rebooting..."
+        ssh root@{{.COMPANION_HOST}} 'reboot'
 
   deploy-services:
     desc: Deploy companion systemd services
@@ -101,14 +343,17 @@ tasks:
     cmds:
       - rsync -avz --progress {{.BITSTREAM}} root@{{.COMPANION_HOST}}:{{.REMOTE_FW_DIR}}/top.bin
 
-  # --- Full initial setup (one-time) ---
+  # --- Full initial setup ---
   provision:
-    desc: Build Linux, flash, wait for boot, deploy, SSH in
+    desc: "Full setup: build, download, create ESP, flash firmware+OS, connect"
     cmds:
       - task: build
-      - task: flash
+      - task: download
+      - task: make-esp
+      - task: flash-firmware
+      - task: flash-os
+      - task: host-setup
       - task: wait
-      - task: deploy
       - task: ssh
 
   clean:

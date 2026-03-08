@@ -2,3 +2,4 @@ build/
 sstate-cache/
 downloads/
 tmp/
+firmware/esp.img

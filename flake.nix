@@ -26,6 +26,11 @@
             openscad-wrapped
             pkgs.uv
             pkgs.libiio
+            pkgs.kas
+            pkgs.qdl
+            pkgs.android-tools
+            pkgs.mtools
+            pkgs.picocom
           ];
           env.LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath [ pkgs.libiio ];
         };

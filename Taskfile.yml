@@ -7,3 +7,6 @@ includes:
   gs:
     taskfile: components/software/ground_station/Taskfile.yml
     dir: components/software/ground_station
+  companion:
+    taskfile: components/software/companion/Taskfile.yml
+    dir: components/software/companion

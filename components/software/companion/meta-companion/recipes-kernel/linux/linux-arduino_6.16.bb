@@ -15,6 +15,12 @@ COMPATIBLE_MACHINE = "qcom-armv8a"
 # Use standard arm64 defconfig (same as Arduino)
 KBUILD_DEFCONFIG = "defconfig"
 
-# Enable PREEMPT_RT and board support
+# Config fragments: board support (no CMDLINE changes — initramfs handles root)
 SRC_URI += "file://rt.cfg \
             file://uno-q.cfg"
+
+# inherit kernel does NOT auto-merge .cfg fragments — do it manually
+do_configure:append() {
+    ${S}/scripts/kconfig/merge_config.sh -m ${B}/.config ${WORKDIR}/rt.cfg ${WORKDIR}/uno-q.cfg
+    oe_runmake -C ${S} O=${B} olddefconfig
+}

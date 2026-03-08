@@ -1,0 +1,25 @@
+[Unit]
+Description=USB ECM gadget network
+DefaultDependencies=no
+After=sys-kernel-config.mount
+Wants=sys-kernel-config.mount
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/sh -c '\
+    modprobe libcomposite && \
+    mkdir -p /sys/kernel/config/usb_gadget/g0 && \
+    cd /sys/kernel/config/usb_gadget/g0 && \
+    echo 0x1d6b > idVendor && \
+    echo 0x0104 > idProduct && \
+    mkdir -p strings/0x409 && \
+    echo "drone-companion" > strings/0x409/product && \
+    mkdir -p configs/c.1/strings/0x409 && \
+    echo "ECM" > configs/c.1/strings/0x409/configuration && \
+    mkdir -p functions/ecm.usb0 && \
+    ln -sf functions/ecm.usb0 configs/c.1/ && \
+    ls /sys/class/udc/ | head -1 > UDC'
+
+[Install]
+WantedBy=multi-user.target

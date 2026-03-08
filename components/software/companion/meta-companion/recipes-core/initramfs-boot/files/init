@@ -1,0 +1,27 @@
+#!/bin/sh
+# Minimal initramfs init — wait for root device then switch_root
+
+mount -t proc proc /proc
+mount -t sysfs sysfs /sys
+mount -t devtmpfs devtmpfs /dev
+
+ROOT=/dev/mmcblk0p68
+
+echo "initramfs: waiting for $ROOT..."
+i=0
+while [ ! -b "$ROOT" ] && [ "$i" -lt 100 ]; do
+    sleep 0.1
+    i=$((i + 1))
+done
+
+if [ ! -b "$ROOT" ]; then
+    echo "initramfs: $ROOT not found after 10s, dropping to shell"
+    exec /bin/sh
+fi
+
+echo "initramfs: mounting $ROOT"
+mkdir -p /mnt
+mount -o rw "$ROOT" /mnt
+
+umount /proc /sys /dev 2>/dev/null
+exec switch_root /mnt /sbin/init
