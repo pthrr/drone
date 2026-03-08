@@ -1,0 +1,11 @@
+[Unit]
+Description=Load iCE40 bitstream via SPI
+After=usb-gadget.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/opt/drone/spi-loader/load.sh
+
+[Install]
+WantedBy=multi-user.target

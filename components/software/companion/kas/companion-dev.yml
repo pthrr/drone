@@ -1,0 +1,13 @@
+# KAS dev overlay — disable RT + add debug tools
+# Build: kas build kas/companion-rt.yml:kas/companion-dev.yml
+header:
+  version: 14
+  includes:
+    - companion-rt.yml
+
+local_conf_header:
+  rt-override: |
+    RT_ENABLED = "0"
+  debug: |
+    EXTRA_IMAGE_FEATURES:append = " debug-tweaks"
+    IMAGE_INSTALL:append = " gdb openssh-sftp-server tcpdump"

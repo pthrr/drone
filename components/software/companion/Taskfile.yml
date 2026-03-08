@@ -1,0 +1,117 @@
+version: "3"
+
+vars:
+  KAS_DIR: "{{.ROOT_DIR}}/kas"
+  IMAGE_DIR: "{{.ROOT_DIR}}/build/tmp/deploy/images/qcom-armv8a"
+  COMPANION_HOST: '{{.COMPANION_HOST | default "192.168.7.2"}}'
+  REMOTE_FW_DIR: /opt/drone
+  SERVICES_DIR: "{{.ROOT_DIR}}/services"
+  BITSTREAM: '{{.BITSTREAM | default "../../ice40-top/build/top.bin"}}'
+
+tasks:
+  # --- Yocto build ---
+  build:
+    desc: Build RT image for QRB2210
+    cmds:
+      - kas build {{.KAS_DIR}}/companion-rt.yml
+
+  build-dev:
+    desc: Build dev image (standard kernel + debug tools)
+    cmds:
+      - kas build {{.KAS_DIR}}/companion-rt.yml:{{.KAS_DIR}}/companion-dev.yml
+
+  shell:
+    desc: Open bitbake shell for RT build
+    cmds:
+      - kas shell {{.KAS_DIR}}/companion-rt.yml
+
+  # --- Flash Linux to eMMC (one-time) ---
+  flash:
+    desc: Flash Linux image to eMMC via EDL (qdl)
+    preconditions:
+      - sh: lsusb | grep -q 05c6:9008
+        msg: "Board not in EDL mode. Short JCTL pins 1-2 (furthest from USB-C), then plug in USB. Verify: lsusb | grep 05c6:9008"
+      - sh: command -v qdl
+        msg: "qdl not found. Install: https://github.com/linux-msm/qdl"
+    cmds:
+      - qdl --storage emmc {{.IMAGE_DIR}}/prog_firehose.elf {{.IMAGE_DIR}}/rawprogram*.xml {{.IMAGE_DIR}}/patch*.xml
+
+  # --- USB network ---
+  host-setup:
+    desc: Configure host USB network interface (run after board boots)
+    cmds:
+      - |
+        USB_IF=$(ip -o link | grep -i 'enp.*u' | head -1 | awk -F': ' '{print $2}')
+        if [ -z "$USB_IF" ]; then
+          echo "No USB network interface found. Is the board connected and booted?"
+          exit 1
+        fi
+        echo "Configuring $USB_IF with 192.168.7.1/30"
+        sudo ip addr replace 192.168.7.1/30 dev "$USB_IF"
+        sudo ip link set "$USB_IF" up
+
+  wait:
+    desc: Wait for board to become reachable
+    cmds:
+      - |
+        echo "Waiting for {{.COMPANION_HOST}}..."
+        for i in $(seq 1 60); do
+          if ping -c1 -W1 {{.COMPANION_HOST}} >/dev/null 2>&1; then
+            echo "Board is up after ${i}s"
+            exit 0
+          fi
+          if [ "$i" = "10" ]; then
+            echo "Hint: run 'task companion:host-setup' in another terminal if USB interface is not configured"
+          fi
+          sleep 1
+        done
+        echo "Timeout waiting for board"
+        exit 1
+
+  # --- SSH ---
+  ssh:
+    desc: SSH into companion board
+    cmds:
+      - ssh root@{{.COMPANION_HOST}}
+
+  # --- Deploy to running board (iterative) ---
+  deploy:
+    desc: Deploy services + iCE40 bitstream to board
+    cmds:
+      - task: deploy-services
+      - task: deploy-bitstream
+
+  deploy-services:
+    desc: Deploy companion systemd services
+    cmds:
+      - >-
+        rsync -avz --progress
+        --filter=':- .gitignore'
+        --exclude='build/' --exclude='__pycache__/' --exclude='.venv/'
+        --exclude='*.o' --exclude='*.pyc' --exclude='.cache/'
+        {{.SERVICES_DIR}}/ root@{{.COMPANION_HOST}}:{{.REMOTE_FW_DIR}}/
+      - |
+        ssh root@{{.COMPANION_HOST}} '\
+          find {{.REMOTE_FW_DIR}} -name "*.service" -exec ln -sf {} /etc/systemd/system/ \; && \
+          systemctl daemon-reload'
+      - echo "Services deployed — use 'task companion:ssh' to start/enable them"
+
+  deploy-bitstream:
+    desc: Deploy iCE40 bitstream
+    cmds:
+      - rsync -avz --progress {{.BITSTREAM}} root@{{.COMPANION_HOST}}:{{.REMOTE_FW_DIR}}/top.bin
+
+  # --- Full initial setup (one-time) ---
+  provision:
+    desc: Build Linux, flash, wait for boot, deploy, SSH in
+    cmds:
+      - task: build
+      - task: flash
+      - task: wait
+      - task: deploy
+      - task: ssh
+
+  clean:
+    desc: Remove build artifacts
+    cmds:
+      - rm -rf build/tmp build/cache build/sstate-cache

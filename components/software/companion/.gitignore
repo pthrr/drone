@@ -1,0 +1,4 @@
+build/
+sstate-cache/
+downloads/
+tmp/
