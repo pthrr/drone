@@ -1,0 +1,4 @@
+(fp_lib_table
+  (version 7)
+  (lib (name "AT86RF215")(type "KiCad")(uri "${KIPRJMOD}/libs/AT86RF215.pretty")(options "")(descr "AT86RF215-ZU QFN-48 footprint"))
+)

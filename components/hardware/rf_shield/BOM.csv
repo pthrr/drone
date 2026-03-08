@@ -1,0 +1,28 @@
+Reference,Value,Package,Description
+U1,AT86RF215-ZU,QFN-48,Dual-band RF transceiver (sub-GHz only used)
+Y1,26MHz TCXO,3225,"26.000 MHz +/-2ppm TCXO (e.g. ASTX-H11)"
+J3,Header_2x20,2.54mm,Stack connector to Olimex EXT1 (SPI)
+J4,Header_2x20,2.54mm,Stack connector to Olimex EXT4 (LVDS)
+J5,SMA_SUB1G,SMA_EDGE,"SMA connector, sub-GHz antenna"
+R1,100R,0402,LVDS term RXDP09/RXDN09 (DP15)
+R2,100R,0402,LVDS term RXCLKP/RXCLKN (DP16)
+R3,100R,0402,LVDS term TXDP/TXDN (DP17)
+R4,100R,0402,LVDS term TXCLKP/TXCLKN (DP18)
+R5,10K,0402,RSTN pull-up to +3V3
+R6,10K,0402,SELN pull-up to +3V3
+C1,100nF,0402,EVDD decoupling (pin 15)
+C2,100nF,0402,EVDD decoupling (pin 46)
+C3,100nF,0402,DEVDD decoupling (pin 21)
+C4,100nF,0402,DEVDD decoupling (pin 29)
+C5,100nF,0402,DEVDD decoupling (pin 39)
+C6,100nF,0402,AVDD0 decoupling (pin 14)
+C7,100nF,0402,AVDD1 decoupling (pin 47)
+C8,100nF,0402,DVDD decoupling (pin 37)
+C9,10uF,0805,DVDD bulk decoupling
+C10,10uF,0805,VDD bulk input
+C11,100nF,0402,TCXO VDD decoupling
+C12,TBD,0402,Sub-GHz DC block (RFP09)
+C13,TBD,0402,Sub-GHz match
+L1,TBD,0402,Sub-GHz match
+C14,100pF,0402,Sub-GHz RFN09 termination to GND
+C18,100nF,0402,RSTN power-on reset filter

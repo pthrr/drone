@@ -1,0 +1,38 @@
+# KiCad backup files
+*-backups/
+*.bak
+*~
+
+# KiCad local settings (user-specific)
+*.kicad_prl
+fp-info-cache
+
+# Gerber / fabrication outputs
+gerber/
+fabrication/
+*.gbr
+*.gbl
+*.gbs
+*.gbo
+*.gbp
+*.gtl
+*.gts
+*.gto
+*.gtp
+*.gm1
+*.drl
+
+# KiCad DRC/ERC reports
+*.rpt
+
+# 3D model cache
+3d-cache/
+
+# OpenSCAD build outputs
+*.stl
+*.amf
+*.3mf
+
+# OS junk
+.DS_Store
+Thumbs.db

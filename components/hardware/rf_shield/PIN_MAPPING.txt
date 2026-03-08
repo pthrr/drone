@@ -1,0 +1,218 @@
+# AT86RF215 Shield — Pin Mapping & Connections
+# For Olimex iCE40HX8K-EVB (Rev B1)
+# FPGA: iCE40-HX8K in CT256 BGA (same die as Lattice board)
+# Pin numbers verified against AT86RF215 datasheet Table 2-1
+# DP pair assignments derived from icestorm chipdb-8k tile structure
+
+================================================================================
+SPI INTERFACE (via EXT1, Bank 0)
+================================================================================
+Signal       EXT1 Pin  FPGA Ball  FPGA PIO         AT86RF215 Pin
+--------------------------------------------------------------------
+SPI_SCLK     13        B14        PIO0_03          41
+SPI_MOSI     21        A16        PIO0_07          43
+SPI_MISO     23        A15        PIO0_08          44
+SPI_CSn      25        B13        PIO0_09          42 (SELN)
+RF_IRQ       33        B12        PIO0_13          40
+RF_RSTn      35        B10        PIO0_14          13 (RSTN)
+
+EXT1 power: pin 1 = +3V3, pin 2 = GND
+
+================================================================================
+LVDS I/Q INTERFACE (via EXT4, Bank 3)
+================================================================================
+
+The lower Bank 3 pins (PIO3_00-PIO3_28, DP00-DP14, balls B2-J2) are used
+by the Olimex on-board SRAM and are NOT available on any EXT header.
+
+The upper Bank 3 pins (PIO3_29-PIO3_51, DP15-DP25) are on EXT4 and have
+full differential pair capability. 11 DP pairs available, 4 needed.
+
+Signal       EXT4 Pin  FPGA Ball  FPGA PIO/DP              AT86RF215 Pin  Term
+--------------------------------------------------------------------------------
+RXDP09       29        K1         PIO3_30/DP15A            31             R1
+RXDN09       31        K3         PIO3_31/DP15B            30             R1
+RXCLKP       33        L4         PIO3_32/DP16A            34             R2
+RXCLKN       35        L1         PIO3_33/DP16B            33             R2
+TXDP         37        K4         PIO3_34/DP17A            28             R3
+TXDN         39        M1         PIO3_35/DP17B            27             R3
+TXCLKP       40        L6         PIO3_36/DP18A            26             R4
+TXCLKN       38        L3         PIO3_37/DP18B            25             R4
+
+EXT4 power: pin 1 = +3V3, pin 2 = GND
+
+Notes on LVDS:
+  - RX pairs (DP15, DP16): true LVDS input buffers in iCE40 Bank 3.
+    iCE40 HX8K supports up to 4 simultaneous LVDS inputs per bank.
+  - TX pairs (DP17, DP18): pseudo-differential output (two LVCMOS, one inverted).
+    Any I/O pair works; DP designation not required but helps routing.
+  - At 400 kHz I/Q sample rate, LVDS clock is ~200 kHz (DDR).
+    Signal integrity over pin headers is not a concern at these frequencies.
+  - All 4 pairs are in a contiguous block (EXT4 pins 29-40) for clean routing.
+
+================================================================================
+POWER
+================================================================================
+
++3.3V from Olimex board (via EXT1 pin 1 or EXT4 pin 1)
+  |
+  +---> AT86RF215 EVDD (pins 15, 46) -- external analog supply
+  |     +-- C1, C2 (100nF) to GND
+  |
+  +---> AT86RF215 DEVDD (pins 21, 29, 39) -- external digital supply
+  |     +-- C3, C4, C5 (100nF) to GND
+  |
+  +---> TCXO VDD -- 3.3V
+        +-- C11 (100nF) to GND
+
+Internal regulated outputs (need decoupling caps only, no external LDO):
+  AT86RF215 AVDD0 (pin 14) -- internal 1.8V analog sub-1GHz
+        +-- C6 (100nF) to GND
+  AT86RF215 AVDD1 (pin 47) -- internal 1.8V analog 2.4GHz
+        +-- C7 (100nF) to GND
+  AT86RF215 DVDD (pin 37) -- internal 1.8V digital
+        +-- C8 (100nF) to GND
+        +-- C9 (10uF) bulk to GND
+
+Note: EVDD and DEVDD must be shorted at PCB level (same 3.3V rail).
+      AVDD0, AVDD1, DVDD must NOT be shorted -- separate internal regulators.
+
+================================================================================
+RF PATH (sub-GHz only)
+================================================================================
+
+Sub-GHz (432 MHz / 868 MHz):
+  AT86RF215 RFP09 (pin 8) --> C12 (DC block) --> L1/C13 (LC match to 50R) --> SMA J5
+  AT86RF215 RFN09 (pin 9) --> C14 (100pF) --> GND (terminated)
+  Single-ended drive: ~3 dB loss, 30 dB margin remains
+
+2.4 GHz frontend NOT USED -- RFP24 (pin 4) and RFN24 (pin 5) left floating.
+FEA24 (pin 1), FEB24 (pin 2) no-connect.
+
+Antenna: single dual-band whip for 432 + 868 MHz (2:1 frequency ratio).
+  LC match designed for broadband; 2-3 dB mismatch loss at off-center
+  frequency is negligible with 30+ dB margin on both bands.
+
+Note: No balun needed -- link budget has >30 dB margin.
+      Match values per AT86RF215 datasheet single-ended application note.
+      Verify with VNA on actual PCB.
+
+================================================================================
+LVDS TERMINATION
+================================================================================
+
+100R resistors placed CLOSE TO FPGA SIDE (receiver end):
+
+  R1: RXDP09 --[100R]-- RXDN09   (sub-GHz RX data)
+  R2: RXCLKP --[100R]-- RXCLKN   (RX clock)
+
+100R resistors placed CLOSE TO AT86RF215 SIDE (receiver end):
+
+  R3: TXDP   --[100R]-- TXDN     (TX data, AT86RF215 receives)
+  R4: TXCLKP --[100R]-- TXCLKN   (TX clock, AT86RF215 receives)
+
+================================================================================
+RESET CIRCUIT
+================================================================================
+
+                +3.3V
+                  |
+                  R5 (10K)
+                  |
+  FPGA PIO0_14 --+---- AT86RF215 RSTN (pin 13)
+                  |
+                 C18 (100nF)
+                  |
+                 GND
+
+R5 holds RSTN high (active). FPGA can pull low to reset.
+C18 provides power-on reset delay (~1ms with 10K).
+
+================================================================================
+26 MHz TCXO
+================================================================================
+
+  Y1 (26MHz TCXO, +/-2ppm)
+    OUT --> AT86RF215 TCXO (pin 17)
+    VDD --> +3.3V via C11 (100nF)
+    GND --> GND
+
+  AT86RF215 XTAL2 (pin 18) --> GND (required in TCXO mode)
+
+================================================================================
+ACTIVE-LOW ACCENT
+================================================================================
+
+  SELN (pin 42): pull-up R6 (10K) to +3.3V -- deselects SPI when FPGA not driving
+  RSTN (pin 13): pull-up R5 (10K) to +3.3V -- keeps chip out of reset
+
+================================================================================
+UNUSED DIFFERENTIAL PAIRS ON EXT4 (available for future use)
+================================================================================
+
+DP19: K5(pin 36) / M2(pin 34) -- PIO3_38/PIO3_39
+DP20: L7(pin 32) / N2(pin 30) -- PIO3_40/PIO3_41
+DP21: M6(pin 28) / M3(pin 26) -- PIO3_42/PIO3_43
+DP22: L5(pin 24) / N3(pin 22) -- PIO3_44/PIO3_45
+DP23: P1(pin 20) / M4(pin 18) -- PIO3_46/PIO3_47
+DP24: P2(pin 16) / M5(pin 14) -- PIO3_48/PIO3_49
+DP25: R1(pin 12) / N4(pin 10) -- PIO3_50/PIO3_51
+
+================================================================================
+PCB LAYOUT NOTES
+================================================================================
+
+1. 4-layer stackup recommended: SIG-GND-PWR-SIG
+2. LVDS pairs: route as 100R differential, length-matched within pair
+3. RF traces: 50R microstrip, keep as short as possible
+4. AT86RF215 exposed pad: solid GND via array
+5. Separate AVSS and DVSS ground pours, connect at single point under IC
+6. Place decoupling caps within 1mm of IC power pins
+7. Shield outline matches Olimex iCE40HX8K-EVB board dimensions
+8. Stacking headers: use extra-long-pin female headers (e.g. Samtec SSW series)
+   Shield plugs into EXT1 (SPI) and EXT4 (LVDS) on the Olimex board
+9. SMA connector on board edge
+10. Keep LVDS traces away from RF section
+11. EXT1 and EXT4 are on opposite sides of the Olimex board --
+    shield must span the full board width or use a flex cable for one connector
+
+================================================================================
+COMPONENT REFERENCE CHANGES (vs. original Lattice-targeted design)
+================================================================================
+
+Removed (2.4GHz not used):
+  R2 (RXDP24/RXDN24 term) -- was 100R
+  J6 (SMA 2.4GHz) -- was SMA_EDGE
+  C15, L2, C16 (2.4GHz match) -- were TBD/0402
+  C17 (RFN24 term) -- was 100pF
+
+Renumbered:
+  R1: RXDP09/RXDN09 termination (100R) -- unchanged
+  R2: RXCLKP/RXCLKN termination (100R) -- was R3
+  R3: TXDP/TXDN termination (100R) -- was R4
+  R4: TXCLKP/TXCLKN termination (100R) -- was R5
+  R5: RSTN pull-up (10K) -- was R6
+  R6: SELN pull-up (10K) -- was R7
+
+Header connectors:
+  J3: 2x20 header → mates with Olimex EXT1 (was "iCE40 J2")
+  J4: 2x20 header → mates with Olimex EXT4 (was "iCE40 J4")
+
+================================================================================
+HOST INTERFACE (not on the RF shield — separate wiring)
+================================================================================
+
+Arduino Uno Q connects to Olimex iCE40 via SPI data bus on EXT2 or EXT3.
+Both boards are 3.3V logic — no level shifting required.
+This connection is NOT routed through the RF shield board.
+
+Three separate SPI domains in the system:
+  1. Config SPI:  FPGA master → AT86RF215 slave    (shield EXT1, Bank 0)
+  2. Data SPI:    Uno Q master → FPGA slave         (EXT2/3, Bank 0/1)
+  3. Flash SPI:   FTDI → SPI flash → iCE40          (on-board, not on headers)
+
+Programming workflow:
+  - FPGA bitstream: iceprog via Olimex USB/FTDI → on-board SPI flash
+  - iCE40 auto-loads from flash on every power cycle
+  - Arduino firmware: USB-C on Uno Q board
+  - AT86RF215 config: FPGA writes registers via SPI at boot + band switch

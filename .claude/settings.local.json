@@ -2,7 +2,7 @@
   "permissions": {
     "allow": [
       "Bash(nix flake lock:*)",
-      "Bash(task f450:open:*)",
+      "Bash(task:*)",
       "Bash(echo:*)",
       "Bash(nix develop:*)",
       "Bash(openscad:*)",
@@ -10,7 +10,8 @@
       "Bash(ls:*)",
       "WebFetch(domain:raw.githubusercontent.com)",
       "WebFetch(domain:github.com)",
-      "Bash(uv sync:*)"
+      "Bash(uv sync:*)",
+      "WebSearch"
     ]
   }
 }

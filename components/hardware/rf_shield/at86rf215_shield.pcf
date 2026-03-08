@@ -1,0 +1,35 @@
+# AT86RF215 Shield — iCE40 HX8K Pin Constraints
+# For use with Yosys + nextpnr-ice40
+
+# Clock (from breakout board)
+set_io CLK J3
+
+# SPI to AT86RF215 (via J2, Bank 0)
+set_io SPI_SCLK B14
+set_io SPI_MOSI A16
+set_io SPI_MISO A15
+set_io SPI_CSn B13
+set_io RF_IRQ B12
+set_io RF_RSTn B10
+
+# LVDS I/Q to AT86RF215 (via J4, Bank 3)
+set_io RXDP09 B2
+set_io RXDN09 C1
+set_io RXDP24 C2
+set_io RXDN24 D2
+set_io RXCLKP D1
+set_io RXCLKN E2
+set_io TXDP F2
+set_io TXDN F1
+set_io TXCLKP G2
+set_io TXCLKN H2
+
+# LEDs (directly on breakout, useful for debug)
+set_io LED0 B5
+set_io LED1 B4
+set_io LED2 A2
+set_io LED3 A1
+set_io LED4 C5
+set_io LED5 C4
+set_io LED6 B3
+set_io LED7 C3
