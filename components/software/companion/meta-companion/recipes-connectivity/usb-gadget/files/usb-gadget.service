@@ -9,17 +9,38 @@ Before=systemd-networkd.service
 Type=oneshot
 RemainAfterExit=yes
 ExecStart=/bin/sh -c '\
-    # Force DWC3 USB controller to peripheral (device) mode. \
-    # The DTS has dr_mode="otg" with usb-role-switch via ANX7625, \
-    # but role detection may not work — force device mode for ECM gadget. \
+    log() { echo "usb-gadget: $*" > /dev/kmsg; }; \
+    log "=== starting USB gadget setup ==="; \
+    \
+    log "usb_role devices:"; \
+    ls -la /sys/class/usb_role/ 2>&1 | while read l; do log "  $l"; done; \
+    \
+    log "UDC devices:"; \
+    ls -la /sys/class/udc/ 2>&1 | while read l; do log "  $l"; done; \
+    \
+    log "DWC3 mode files:"; \
+    for f in /sys/bus/platform/devices/*.usb/mode; do \
+        log "  $f = $(cat $f 2>&1)"; \
+    done; \
+    \
+    log "attempting role switch to device..."; \
     for role in /sys/class/usb_role/*/role; do \
-        echo device > "$role" 2>/dev/null && break; \
+        log "  trying $role (current: $(cat $role 2>&1))"; \
+        echo device > "$role" 2>/dev/null && log "  -> OK" || log "  -> FAILED"; \
     done; \
+    \
+    log "attempting mode switch to peripheral..."; \
     for mode in /sys/bus/platform/devices/*.usb/mode; do \
-        echo peripheral > "$mode" 2>/dev/null && break; \
+        log "  trying $mode (current: $(cat $mode 2>&1))"; \
+        echo peripheral > "$mode" 2>/dev/null && log "  -> OK" || log "  -> FAILED"; \
     done; \
-    sleep 1 && \
+    \
+    sleep 1; \
+    log "UDC after role switch:"; \
+    ls /sys/class/udc/ 2>&1 | while read l; do log "  $l"; done; \
+    \
     modprobe libcomposite 2>/dev/null; \
+    log "configuring gadget..."; \
     mkdir -p /sys/kernel/config/usb_gadget/g0 && \
     cd /sys/kernel/config/usb_gadget/g0 && \
     echo 0x1d6b > idVendor && \
@@ -30,13 +51,15 @@ ExecStart=/bin/sh -c '\
     echo "ECM" > configs/c.1/strings/0x409/configuration && \
     mkdir -p functions/ecm.usb0 && \
     ln -sf functions/ecm.usb0 configs/c.1/ && \
-    UDC=$(ls /sys/class/udc/ 2>/dev/null | head -1) && \
+    UDC=$(ls /sys/class/udc/ 2>/dev/null | head -1); \
+    log "binding to UDC: ${UDC:-NONE}"; \
     if [ -n "$UDC" ]; then \
-        echo "$UDC" > UDC; \
+        echo "$UDC" > UDC 2>/dev/null && log "UDC bind OK" || log "UDC bind FAILED: $?"; \
     else \
-        echo "usb-gadget: no UDC found" > /dev/kmsg; \
+        log "FATAL: no UDC found"; \
         exit 1; \
-    fi'
+    fi; \
+    log "=== gadget setup complete ==="'
 
 [Install]
 WantedBy=multi-user.target

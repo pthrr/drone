@@ -18,8 +18,8 @@ Produces a minimal PREEMPT_RT Linux image for low-latency SPI communication with
 - **ABL** (`abl.elf`) — Loads Android boot image from `boot_a`. Falls to **fastboot** if `boot_a` is empty/corrupt.
 - **U-Boot** (`boot.img`, 564 KB in `boot_a`) — Packaged as Android boot image. Implements UEFI, loads systemd-boot from ESP.
 - **systemd-boot** (`BOOTAA64.EFI` on ESP) — Reads BLS entries from `/loader/entries/*.conf`. Loads kernel as UEFI application.
-- **Linux** — Kernel (`Image`) with bundled initramfs on ESP. DTB (`qrb2210-rb1.dtb`) on ESP.
-- **initramfs** — Minimal busybox init that waits for `/dev/mmcblk0p68`, mounts it, and `switch_root`s to the real rootfs.
+- **Linux** — Kernel (`Image`) with bundled initramfs on ESP. DTB (`qrb2210-companion.dtb`) on ESP. U-Boot passes the firmware-provided DTB to the kernel via UEFI — the ESP DTB is for reference only (systemd-boot's `devicetree` directive crashes on this board).
+- **initramfs** — Minimal busybox init that waits up to 30s for `/dev/mmcblk0p68`, mounts it, and `switch_root`s to the real rootfs.
 
 The `boot_a` partition is only 4 MB (Qualcomm GPT layout) — too small for the ~52 MB kernel. U-Boot (564 KB) bridges the gap by loading the kernel from the larger ESP (128 MB).
 
@@ -31,7 +31,7 @@ Instead, the kernel uses `CONFIG_CMDLINE_FROM_BOOTLOADER` (the only option that 
 
 1. Kernel boots with bundled initramfs (cpio embedded in Image)
 2. initramfs init script (`/init`) mounts procfs/sysfs/devtmpfs
-3. Waits up to 10s for `/dev/mmcblk0p68` to appear
+3. Waits up to 30s for `/dev/mmcblk0p68` to appear
 4. Mounts it as rootfs and `switch_root`s to `/sbin/init` (systemd)
 
 The boot entry `options` line passes a dummy cmdline — it's never actually used by the kernel for root= because the initramfs handles everything.
@@ -66,51 +66,75 @@ Output: `build/tmp/deploy/images/qcom-armv8a/`
 
 ## Flashing
 
-All flashing is done from the host over USB. EDL is the most reliable method.
+All flashing is done from the host over USB. There are two USB protocols used, each accessing a different level of the boot chain:
 
-### Full flash via EDL (recommended)
+### EDL vs Fastboot
 
-Writes firmware + ESP in one EDL session. Use for initial setup or re-flashing:
+**EDL** (Emergency Download) is the lowest-level flash protocol. It talks directly to the PBL ROM and can write any raw eMMC sector — partition table, firmware, boot images, anything. EDL is always available regardless of software state, making it the recovery path when everything else is broken.
 
+To enter EDL: short **JCTL pins 1-2** (the two pins furthest from USB-C) with a jumper wire, then plug in USB. The PBL sees the shorted pins and enters download mode instead of booting. The board appears as USB device `05c6:9008`. After flashing, remove the jumper and replug USB to boot normally.
+
+**Fastboot** is Android's bootloader-level flash protocol. It runs inside ABL (the Application Boot Loader) and can write named partitions like `efi`, `rootfs`, `boot_a`. It's faster and more convenient than EDL but only available when ABL is running — which requires the lower boot chain (PBL → XBL → ABL) to be intact.
+
+The board enters fastboot when ABL has nothing to boot — e.g., after `wipe-boot` erases boot_a, or from a running system via `reboot bootloader`. No jumper needed. The board appears as a USB fastboot device.
+
+### What each task writes
+
+```
+eMMC layout         flash-firmware  flash-all  flash-os  wipe-boot
+─────────────────   ──────────────  ─────────  ────────  ─────────
+GPT partition table      ✓              ✓
+XBL, TZ, HYP, RPM       ✓              ✓
+ABL                      ✓              ✓
+boot_a (U-Boot)          ✓              ✓                   erase
+boot_b                   ✓              ✓                   erase
+ESP (kernel+DTB)                        ✓          ✓        erase
+rootfs (p68)                                       ✓
+uefivarstore                                     clear
+```
+
+All EDL tasks (flash-firmware, flash-all, wipe-boot) require the **JCTL jumper**. Fastboot tasks (flash-os) do not.
+
+### Common workflows
+
+**Initial setup (new board):**
 ```bash
-nix develop -c task companion:download     # download images from S3
-nix develop -c task companion:make-esp     # create ESP image with kernel + DTB + systemd-boot
-# Short JCTL pins 1-2 (furthest from USB-C), plug in USB
-nix develop -c task companion:flash-all    # firmware + ESP via EDL
+nix develop -c task companion:download
+nix develop -c task companion:make-esp
+# Jumper JCTL pins 1-2, plug USB
+nix develop -c task companion:flash-all       # firmware + ESP via EDL
+# Remove jumper, replug — board boots but rootfs is empty
+# Board enters fastboot (ABL can't find rootfs init)
+nix develop -c task companion:flash-os        # rootfs via fastboot
+# Board reboots into Linux
+```
+
+**Normal rebuild (board is running):**
+```bash
+nix develop -c task companion:download
+nix develop -c task companion:make-esp
+# Jumper JCTL pins 1-2, plug USB
+nix develop -c task companion:flash-all       # new ESP (kernel) via EDL
+# Remove jumper, replug — board boots with new kernel, old rootfs
+```
+
+To also update the rootfs (e.g., new services, packages), add a fastboot step. Get into fastboot from a running board with `ssh root@192.168.7.2 reboot bootloader`, then:
+```bash
+nix develop -c task companion:flash-os        # new ESP + rootfs via fastboot
+```
+
+**Recovery (board stuck, no USB, no serial):**
+```bash
+# Jumper JCTL pins 1-2, plug USB
+nix develop -c task companion:wipe-boot       # erase boot via EDL — board enters fastboot
+# Remove jumper, replug
+nix develop -c task companion:flash-os        # rootfs via fastboot (board stays in fastboot — no U-Boot yet)
+# Jumper JCTL pins 1-2, plug USB
+nix develop -c task companion:flash-all       # restore firmware + ESP via EDL
 # Remove jumper, replug — board boots
 ```
 
-### Firmware only (one-time)
-
-Writes GPT partition table + Qualcomm boot chain. Only needed once per board:
-
-```bash
-# Short JCTL pins 1-2, plug in USB
-nix develop -c task companion:flash-firmware
-# Remove jumper, replug
-```
-
-### OS only via fastboot
-
-Writes ESP + rootfs. Board must be in fastboot mode (after `flash-firmware` or `reboot bootloader`):
-
-```bash
-nix develop -c task companion:flash-os     # flash ESP + rootfs, set slot A active, clear UEFI vars
-```
-
-**Important:** `flash-os` does NOT flash boot_a (U-Boot). If you ran `wipe-boot` first, you MUST run `flash-all` before `flash-os` to restore the boot chain.
-
-### Recovery (board stuck in boot loop)
-
-```bash
-# Short JCTL pins 1-2, plug in USB
-nix develop -c task companion:wipe-boot    # wipes boot_a/b + ESP via EDL
-# Remove jumper, replug — board enters fastboot
-nix develop -c task companion:flash-all    # restore firmware + ESP via EDL
-nix develop -c task companion:flash-os     # flash rootfs via fastboot
-```
-
-**Note:** The `qcserial` kernel module on the host may grab EDL devices before `qdl` can. Fix:
+**Note:** The `qcserial` kernel module on the host grabs EDL devices before `qdl` can. Fix:
 ```
 # NixOS: boot.blacklistedKernelModules = [ "qcserial" "usb_wwan" ];
 # Or temporarily: sudo rmmod qcserial usb_wwan
