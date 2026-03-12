@@ -9,6 +9,10 @@ S = "${WORKDIR}"
 do_install() {
     install -d ${D}
     install -m 0755 ${WORKDIR}/init ${D}/init
+
+    # Create /dev/console so kernel can open initial console before devtmpfs
+    install -d ${D}/dev
+    mknod ${D}/dev/console c 5 1
 }
 
-FILES:${PN} = "/init"
+FILES:${PN} = "/init /dev /dev/console"

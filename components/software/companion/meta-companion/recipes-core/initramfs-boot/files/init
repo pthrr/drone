@@ -1,41 +1,54 @@
 #!/bin/sh
 # Minimal initramfs init — wait for root device then switch_root
 
-echo "initramfs: starting"
 mount -t proc proc /proc
 mount -t sysfs sysfs /sys
 mount -t devtmpfs devtmpfs /dev
 
+# Log to kernel ring buffer (visible on serial even without /dev/console)
+log() { echo "initramfs: $*" > /dev/kmsg; }
+
+log "starting"
+
 ROOT=/dev/mmcblk0p68
 
-echo "initramfs: waiting for $ROOT..."
+log "waiting for $ROOT (up to 30s)..."
 i=0
-while [ ! -b "$ROOT" ] && [ "$i" -lt 100 ]; do
+while [ ! -b "$ROOT" ] && [ "$i" -lt 300 ]; do
     sleep 0.1
     i=$((i + 1))
 done
 
-echo "initramfs: block devices:"
-ls -la /dev/mmcblk* 2>/dev/null || echo "  (no mmcblk devices found)"
+log "block devices after ${i}00ms:"
+ls /dev/mmcblk* 2>/dev/null | while read d; do log "  $d"; done
+if ! ls /dev/mmcblk* >/dev/null 2>&1; then
+    log "  (no mmcblk devices found)"
+fi
 
 if [ ! -b "$ROOT" ]; then
-    echo "initramfs: $ROOT not found after 10s, dropping to shell"
+    log "$ROOT not found after 30s, dropping to shell"
     exec /bin/sh
 fi
 
-echo "initramfs: mounting $ROOT as ext4"
+log "mounting $ROOT as ext4"
 mkdir -p /mnt
 if ! mount -t ext4 -o rw "$ROOT" /mnt; then
-    echo "initramfs: mount FAILED, dropping to shell"
+    log "mount FAILED (exit $?), dropping to shell"
     exec /bin/sh
 fi
 
-echo "initramfs: rootfs contents:"
-ls /mnt/sbin/init /mnt/lib/systemd/systemd 2>/dev/null || echo "  (no init found!)"
+if [ -x /mnt/sbin/init ]; then
+    log "found /sbin/init"
+elif [ -x /mnt/lib/systemd/systemd ]; then
+    log "found /lib/systemd/systemd (no /sbin/init)"
+else
+    log "no init found on rootfs! dropping to shell"
+    exec /bin/sh
+fi
 
-echo "initramfs: switch_root to /mnt"
+log "switch_root to /mnt"
 umount /proc /sys 2>/dev/null
 exec switch_root /mnt /sbin/init
 
-echo "initramfs: switch_root FAILED, dropping to shell"
+log "switch_root FAILED, dropping to shell"
 exec /bin/sh
