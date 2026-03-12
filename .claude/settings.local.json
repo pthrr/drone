@@ -26,7 +26,8 @@
       "Bash(ip:*)",
       "Bash(debugfs:*)",
       "Bash(mcopy:*)",
-      "Bash(gunzip:*)"
+      "Bash(gunzip:*)",
+      "Bash(stty:*)"
     ]
   }
 }

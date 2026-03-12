@@ -1,6 +1,7 @@
 #!/bin/sh
 # Minimal initramfs init — wait for root device then switch_root
 
+echo "initramfs: starting"
 mount -t proc proc /proc
 mount -t sysfs sysfs /sys
 mount -t devtmpfs devtmpfs /dev
@@ -14,14 +15,27 @@ while [ ! -b "$ROOT" ] && [ "$i" -lt 100 ]; do
     i=$((i + 1))
 done
 
+echo "initramfs: block devices:"
+ls -la /dev/mmcblk* 2>/dev/null || echo "  (no mmcblk devices found)"
+
 if [ ! -b "$ROOT" ]; then
     echo "initramfs: $ROOT not found after 10s, dropping to shell"
     exec /bin/sh
 fi
 
-echo "initramfs: mounting $ROOT"
+echo "initramfs: mounting $ROOT as ext4"
 mkdir -p /mnt
-mount -o rw "$ROOT" /mnt
+if ! mount -t ext4 -o rw "$ROOT" /mnt; then
+    echo "initramfs: mount FAILED, dropping to shell"
+    exec /bin/sh
+fi
 
-umount /proc /sys /dev 2>/dev/null
+echo "initramfs: rootfs contents:"
+ls /mnt/sbin/init /mnt/lib/systemd/systemd 2>/dev/null || echo "  (no init found!)"
+
+echo "initramfs: switch_root to /mnt"
+umount /proc /sys 2>/dev/null
 exec switch_root /mnt /sbin/init
+
+echo "initramfs: switch_root FAILED, dropping to shell"
+exec /bin/sh
