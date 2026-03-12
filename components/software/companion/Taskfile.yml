@@ -31,7 +31,7 @@ tasks:
           -H 'Content-Type: application/json' \
           -d '{"id":1,"jsonrpc":"2.0","method":"force","params":{
             "reason":"companion build",
-            "job_script":"export PATH=/run/current-system/sw/bin:$PATH; cd /persist/buildbot/workspaces/drone && git pull; cd /persist/buildbot/workspaces/drone/components/software/companion; KAS=$(nix build --no-link --print-out-paths nixpkgs#kas); $KAS/bin/kas-container shell kas/companion-rt.yml -c \"bitbake -c cleansstate linux-arduino\"; $KAS/bin/kas-container build kas/companion-rt.yml && AWSCLI=$(nix build --no-link --print-out-paths nixpkgs#awscli2); export AWS_ACCESS_KEY_ID=admin; export AWS_SECRET_ACCESS_KEY=admin; AWS=$AWSCLI/bin/aws; BUILD_ID=$(curl -s http://localhost:8020/api/v2/builds?order=-buildid\\&limit=1 | sed -n \"s/.*buildrequestid[^0-9]*\\([0-9]*\\).*/\\1/p\" | head -1); $AWS --endpoint-url http://localhost:8333 s3 mb s3://{{.S3_BUCKET}} 2>/dev/null; IMG=build/tmp/deploy/images/qcom-armv8a; INITRAMFS=$(ls $IMG/Image-initramfs-*.bin 2>/dev/null | head -1); if [ -n \"$INITRAMFS\" ]; then gzip -c $INITRAMFS > $IMG/Image.gz; fi; for f in $IMG/Image.gz $IMG/core-image-base-qcom-armv8a.rootfs.ext4.gz $IMG/qrb2210-rb1.dtb $IMG/modules-qcom-armv8a.tgz; do $AWS --endpoint-url http://localhost:8333 s3 cp $(readlink -f $f) s3://{{.S3_BUCKET}}/$BUILD_ID/$(basename $f); done; $AWS --endpoint-url http://localhost:8333 s3 cp s3://{{.S3_BUCKET}}/$BUILD_ID/ s3://{{.S3_BUCKET}}/latest/ --recursive",
+            "job_script":"export PATH=/run/current-system/sw/bin:$PATH; cd /persist/buildbot/workspaces/drone && git pull; cd /persist/buildbot/workspaces/drone/components/software/companion; KAS=$(nix build --no-link --print-out-paths nixpkgs#kas); $KAS/bin/kas-container shell kas/companion-rt.yml -c \"bitbake -c cleansstate linux-arduino\"; $KAS/bin/kas-container build kas/companion-rt.yml && AWSCLI=$(nix build --no-link --print-out-paths nixpkgs#awscli2); export AWS_ACCESS_KEY_ID=admin; export AWS_SECRET_ACCESS_KEY=admin; AWS=$AWSCLI/bin/aws; BUILD_ID=$(curl -s http://localhost:8020/api/v2/builds?order=-buildid\\&limit=1 | sed -n \"s/.*buildrequestid[^0-9]*\\([0-9]*\\).*/\\1/p\" | head -1); $AWS --endpoint-url http://localhost:8333 s3 mb s3://{{.S3_BUCKET}} 2>/dev/null; IMG=build/tmp/deploy/images/qcom-armv8a; INITRAMFS=$(ls $IMG/Image-initramfs-*.bin 2>/dev/null | head -1); if [ -n \"$INITRAMFS\" ]; then gzip -c $INITRAMFS > $IMG/Image.gz; fi; for f in $IMG/Image.gz $IMG/core-image-base-qcom-armv8a.rootfs.ext4.gz $IMG/qrb2210-companion.dtb $IMG/modules-qcom-armv8a.tgz; do $AWS --endpoint-url http://localhost:8333 s3 cp $(readlink -f $f) s3://{{.S3_BUCKET}}/$BUILD_ID/$(basename $f); done; $AWS --endpoint-url http://localhost:8333 s3 cp s3://{{.S3_BUCKET}}/$BUILD_ID/ s3://{{.S3_BUCKET}}/latest/ --recursive",
             "job_args":""}}')
         echo "$RESULT" | python3 -c "import sys,json; r=json.load(sys.stdin); print('Build triggered: buildset', list(r['result'][1].values())[0])"
 
@@ -66,7 +66,7 @@ tasks:
     cmds:
       - mkdir -p {{.IMAGE_DIR}}
       - |
-        for f in Image.gz core-image-base-qcom-armv8a.rootfs.ext4.gz qrb2210-rb1.dtb modules-qcom-armv8a.tgz; do
+        for f in Image.gz core-image-base-qcom-armv8a.rootfs.ext4.gz qrb2210-companion.dtb modules-qcom-armv8a.tgz; do
           echo "Downloading {{.BUILD_ID}}/$f..."
           curl -sf "{{.S3_ENDPOINT}}/{{.S3_BUCKET}}/{{.BUILD_ID}}/$f" -o "{{.IMAGE_DIR}}/$f" || { echo "Failed to download $f"; exit 1; }
         done
@@ -78,7 +78,7 @@ tasks:
     preconditions:
       - sh: test -f {{.IMAGE_DIR}}/Image.gz
         msg: "Kernel not found. Run 'task companion:download' first."
-      - sh: test -f {{.IMAGE_DIR}}/qrb2210-rb1.dtb
+      - sh: test -f {{.IMAGE_DIR}}/qrb2210-companion.dtb
         msg: "DTB not found. Run 'task companion:download' first."
       - sh: test -f {{.BOOTLOADER_DIR}}/BOOTAA64.EFI
         msg: "systemd-boot not found in {{.BOOTLOADER_DIR}}/. Run 'task companion:pull-bootloader' first."
@@ -105,7 +105,7 @@ tasks:
       # Install kernel
       - mcopy -i {{.IMAGE_DIR}}/esp.img {{.IMAGE_DIR}}/Image ::/
       # Install DTB
-      - mcopy -i {{.IMAGE_DIR}}/esp.img {{.IMAGE_DIR}}/qrb2210-rb1.dtb ::/dtb/qcom/
+      - mcopy -i {{.IMAGE_DIR}}/esp.img {{.IMAGE_DIR}}/qrb2210-companion.dtb ::/dtb/qcom/
       # Create systemd-boot loader config
       - |
         TMPDIR=$(mktemp -d)
@@ -309,7 +309,7 @@ tasks:
     preconditions:
       - sh: test -f {{.IMAGE_DIR}}/Image.gz
         msg: "Kernel not found. Run 'task companion:download' first."
-      - sh: test -f {{.IMAGE_DIR}}/qrb2210-rb1.dtb
+      - sh: test -f {{.IMAGE_DIR}}/qrb2210-companion.dtb
         msg: "DTB not found. Run 'task companion:download' first."
     cmds:
       - |
@@ -318,7 +318,7 @@ tasks:
       - |
         echo "Uploading kernel + DTB to ESP..."
         scp {{.IMAGE_DIR}}/Image root@{{.COMPANION_HOST}}:/boot/efi/
-        scp {{.IMAGE_DIR}}/qrb2210-rb1.dtb root@{{.COMPANION_HOST}}:/boot/efi/dtb/qcom/
+        scp {{.IMAGE_DIR}}/qrb2210-companion.dtb root@{{.COMPANION_HOST}}:/boot/efi/dtb/qcom/
       - |
         echo "Rebooting..."
         ssh root@{{.COMPANION_HOST}} 'reboot'

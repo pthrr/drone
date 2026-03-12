@@ -1,14 +1,25 @@
 [Unit]
 Description=USB ECM gadget network
 DefaultDependencies=no
-After=sys-kernel-config.mount
+After=sys-kernel-config.mount systemd-modules-load.service
 Wants=sys-kernel-config.mount
+Before=systemd-networkd.service
 
 [Service]
 Type=oneshot
 RemainAfterExit=yes
 ExecStart=/bin/sh -c '\
-    modprobe libcomposite && \
+    # Force DWC3 USB controller to peripheral (device) mode. \
+    # The DTS has dr_mode="otg" with usb-role-switch via ANX7625, \
+    # but role detection may not work — force device mode for ECM gadget. \
+    for role in /sys/class/usb_role/*/role; do \
+        echo device > "$role" 2>/dev/null && break; \
+    done; \
+    for mode in /sys/bus/platform/devices/*.usb/mode; do \
+        echo peripheral > "$mode" 2>/dev/null && break; \
+    done; \
+    sleep 1 && \
+    modprobe libcomposite 2>/dev/null; \
     mkdir -p /sys/kernel/config/usb_gadget/g0 && \
     cd /sys/kernel/config/usb_gadget/g0 && \
     echo 0x1d6b > idVendor && \
@@ -19,7 +30,13 @@ ExecStart=/bin/sh -c '\
     echo "ECM" > configs/c.1/strings/0x409/configuration && \
     mkdir -p functions/ecm.usb0 && \
     ln -sf functions/ecm.usb0 configs/c.1/ && \
-    ls /sys/class/udc/ | head -1 > UDC'
+    UDC=$(ls /sys/class/udc/ 2>/dev/null | head -1) && \
+    if [ -n "$UDC" ]; then \
+        echo "$UDC" > UDC; \
+    else \
+        echo "usb-gadget: no UDC found" > /dev/kmsg; \
+        exit 1; \
+    fi'
 
 [Install]
 WantedBy=multi-user.target

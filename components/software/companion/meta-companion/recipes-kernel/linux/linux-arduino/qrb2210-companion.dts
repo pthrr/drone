@@ -1,0 +1,14 @@
+// SPDX-License-Identifier: GPL-2.0+
+/*
+ * Drone companion computer DTB — based on Arduino Imola (Uno Q / QRB2210)
+ * with USB forced to peripheral mode for ECM gadget networking.
+ */
+
+/dts-v1/;
+
+#include "qrb2210-arduino-imola.dts"
+
+/* Force USB peripheral mode — always a gadget device, not a host */
+&usb_dwc3 {
+	dr_mode = "peripheral";
+};

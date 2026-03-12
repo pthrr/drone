@@ -51,6 +51,8 @@ local_conf_header:
     IMAGE_INSTALL:append = " usb-gadget"
   ssh: |
     EXTRA_IMAGE_FEATURES:append = " ssh-server-openssh"
+  serial-console: |
+    SERIAL_CONSOLES = "115200;ttyMSM0"
   hostname: |
     hostname:pn-base-files = "drone-companion"
 
